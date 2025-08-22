@@ -32,38 +32,73 @@ export default function Home() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedGoal, setSelectedGoal] = useState<Goal | null>(null);
   const [goals, setGoals] = useState<Goal[]>([]);
+  const [mounted, setMounted] = useState(false);
+
+  // Ensure we're on the client side before rendering
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Load goals from localStorage on component mount
   useEffect(() => {
-    const savedGoals = localStorage.getItem("goals");
-    if (savedGoals) {
-      setGoals(JSON.parse(savedGoals));
+    if (mounted) {
+      const savedGoals = localStorage.getItem("goals");
+      if (savedGoals) {
+        setGoals(JSON.parse(savedGoals));
+      }
     }
-  }, []);
+  }, [mounted]);
 
   // Save goals to localStorage whenever goals change
   useEffect(() => {
-    localStorage.setItem("goals", JSON.stringify(goals));
-  }, [goals]);
+    if (mounted) {
+      localStorage.setItem("goals", JSON.stringify(goals));
+    }
+  }, [goals, mounted]);
 
   // Monitor current amount changes and update status automatically
   useEffect(() => {
     setGoals((prevGoals) =>
       prevGoals.map((goal) => {
-        // If current amount changed from 0 (first time), move to "to-do"
-        if (goal.currentAmount > 0 && goal.status === "to-do") {
-          return { ...goal, status: "in-progress" };
+        let newStatus = goal.status;
+
+        // If current amount is 0, stay in "to-do"
+        if (goal.currentAmount === 0) {
+          newStatus = "to-do";
+        }
+        // If current amount is greater than 0 but less than target, move to "in-progress"
+        else if (
+          goal.currentAmount > 0 &&
+          goal.currentAmount < goal.targetAmount
+        ) {
+          newStatus = "in-progress";
+        }
+        // If current amount equals or exceeds target amount, move to "done"
+        else if (goal.currentAmount >= goal.targetAmount) {
+          newStatus = "done";
         }
 
-        // If current amount equals or exceeds target amount, move to "done"
-        if (goal.currentAmount >= goal.targetAmount && goal.status !== "done") {
-          return { ...goal, status: "done" };
+        // Only update if status actually changed
+        if (newStatus !== goal.status) {
+          return { ...goal, status: newStatus };
         }
 
         return goal;
       })
     );
   }, [goals.map((goal) => goal.currentAmount).join(",")]);
+
+  // Don't render until mounted to prevent hydration mismatch
+  if (!mounted) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   const addGoal = (goalData: {
     name: string;
@@ -134,9 +169,29 @@ export default function Home() {
 
   const handleUpdateAmount = (goalId: string, newAmount: number) => {
     setGoals((prev) =>
-      prev.map((goal) =>
-        goal.id === goalId ? { ...goal, currentAmount: newAmount } : goal
-      )
+      prev.map((goal) => {
+        if (goal.id === goalId) {
+          // Ensure amount doesn't exceed target
+          const clampedAmount = Math.min(newAmount, goal.targetAmount);
+
+          // Determine new status based on amount
+          let newStatus = goal.status;
+          if (clampedAmount === 0) {
+            newStatus = "to-do";
+          } else if (clampedAmount > 0 && clampedAmount < goal.targetAmount) {
+            newStatus = "in-progress";
+          } else if (clampedAmount >= goal.targetAmount) {
+            newStatus = "done";
+          }
+
+          return {
+            ...goal,
+            currentAmount: clampedAmount,
+            status: newStatus,
+          };
+        }
+        return goal;
+      })
     );
   };
 
